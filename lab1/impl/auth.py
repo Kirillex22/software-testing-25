@@ -14,9 +14,8 @@ class Authentificator:
         if username not in self._users:
             self._users[username] = password
             self._auth_tries[username] = 1
-            
-        
-    def authenticate(self, username, password) -> bool: 
+
+    def authenticate(self, username, password) -> bool:
         if not (username in self._users and self._users[username] == password):
             if self._auth_tries[username] >= AUTH_TRY_LIMIT:
                 raise TooManyAuthTriesException("Too many auth tries")
@@ -26,10 +25,3 @@ class Authentificator:
 
         self._auth_tries[username] = 1
         return True
-
-        
-
-        
-
-        
-            
