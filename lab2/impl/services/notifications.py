@@ -12,6 +12,7 @@ class NotificationService:
     ):
         self._consumer = consumer
         self._settings = settings
+        self.received = []
         
     def start_listening(
         self, 
@@ -19,17 +20,15 @@ class NotificationService:
         callback=lambda x: logging.info(f"📦 Received: {x}")
     ) -> None:
 
-        self._consumer.subscribe([self._settings.topic_name])
         self.working = True
 
         while self.working:
-            msg = consumer.poll(delay)
+            msg = self._consumer.poll(delay)
             if msg is None:
                 continue
             data = json.loads(msg.value())
             callback(data)
-
-        self._consumer.close()
+            self.received.append(data)
 
     def stop_listening(self):
         self.working = False

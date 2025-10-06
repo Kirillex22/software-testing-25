@@ -1,66 +1,72 @@
 import json
+import threading
+import time
+import factory
+import pytest
 from uuid import uuid4
 from confluent_kafka import Consumer
-from impl.services.orders import take_order
-from impl.services.notifications import NotificationService
 from impl.views.order import OrderView
 from impl.orm.order import Order
+from impl.services.orders import take_order
+from impl.services.notifications import NotificationService
+from config import get_settings
+
+settings = get_settings()
 
 # ============================
-# Тесты
+# Factory-Boy для OrderView
 # ============================
+class OrderViewFactory(factory.Factory):
+    class Meta:
+        model = OrderView
 
-def test_take_order_saves_and_sends(db_session, kafka_producer, kafka_consumer):
-    """Проверяем сохранение заказа в БД и публикацию в Kafka"""
-    order_view = OrderView(
-        id=str(uuid4()),
-        item_name="Keyboard",
-        quantity=3
-    )
+    id = factory.LazyFunction(lambda: str(uuid4()))
+    item_name = factory.Faker("word")
+    quantity = factory.Faker("random_int", min=1, max=10)
 
-    take_order(order_view, kafka_producer, db_session)
+# ============================
+# Единый интеграционный тест
+# ============================
+def test_order_flow(db_session, kafka_producer):
+    """Интеграционный тест: take_order -> БД -> NotificationService"""
 
-    # Проверяем БД
-    saved_order = db_session.query(Order).filter_by(item_name="Keyboard").first()
-    assert saved_order is not None
-    assert saved_order.quantity == 3
+    # 1. Создаем заказ через фабрику
+    order_view = OrderViewFactory()
 
-    # Проверяем Kafka
-    msg = kafka_consumer.poll(5.0)
-    assert msg is not None
-    data = json.loads(msg.value())
-    assert data["item_name"] == "Keyboard"
-    assert data["quantity"] == 3
-
-
-def test_notification_service_receives_messages(settings, kafka_producer):
-    """Проверяем, что NotificationService получает сообщение"""
+    # 2. Настраиваем Kafka Consumer для NotificationService
     consumer = Consumer({
         'bootstrap.servers': settings.broker_url,
-        'group.id': 'notif-test',
+        'group.id': f'test-notif-{uuid4()}',
         'auto.offset.reset': 'earliest'
     })
-    service = NotificationService(consumer, settings=settings)
+    notification_service = NotificationService(consumer)
 
-    received = []
+    # 3. Запускаем NotificationService в отдельном потоке
+    t = threading.Thread(target=notification_service.start_listening, kwargs={'delay': 0.5})
+    t.start()
+    time.sleep(1)  # даем потоку время на подписку
 
-    def callback(data):
-        received.append(data)
+    # 4. Отправляем заказ через сервис
+    take_order(order_view, kafka_producer, db_session)
 
-    # Отправляем сообщение
-    message = {"event": "order_created", "id": str(uuid4()), "item_name": "Mouse"}
-    kafka_producer.produce(settings.topic_name, json.dumps(message).encode("utf-8"))
-    kafka_producer.flush()
+    # 5. Проверяем БД
+    saved_order = db_session.query(Order).filter_by(id=order_view.id).first()
+    assert saved_order is not None
+    assert saved_order.item_name == order_view.item_name
+    assert saved_order.quantity == order_view.quantity
 
-    service._consumer.subscribe([settings.topic_name])
-    msg = service._consumer.poll(5.0)
-    assert msg is not None
+    # 6. Ждем, пока NotificationService получит сообщение
+    timeout = 5
+    start_time = time.time()
+    while not notification_service.received and (time.time() - start_time) < timeout:
+        time.sleep(0.1)
 
-    payload = json.loads(msg.value())
-    callback(payload)
+    # 7. Проверяем сообщение
+    assert len(notification_service.received) == 1
+    received_msg = notification_service.received[0]
+    assert received_msg["id"] == str(order_view.id)
+    assert received_msg["item_name"] == order_view.item_name
 
-    assert len(received) == 1
-    assert received[0]["event"] == "order_created"
-    assert received[0]["item_name"] == "Mouse"
-
-    service._consumer.close()
+    # 8. Останавливаем сервис
+    notification_service.stop_listening()
+    t.join()

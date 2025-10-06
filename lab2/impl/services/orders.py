@@ -17,6 +17,6 @@ def send_message(producer: Producer, topic: str, message: dict):
 def take_order(order: OrderView, producer: Producer, session: Session) -> None:
     order_orm = map_order_view_to_orm(order)
     session.add(order_orm)
-    send_message(settings.topic_name, order.dict())
+    send_message(producer, settings.topic_name, order.to_dict())
 
 
