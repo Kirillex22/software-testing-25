@@ -24,6 +24,7 @@
 1) Клонируйте репозиторий и перейдите в папку `lab2`
 ```bash
     git clone https://github.com/Kirillex22/software-testing-25.git
+    git checkout feature-integration-testing
     cd software-testing-25/lab2
 ```
 2) Создайте `.env` файл по образцу из `.env.example` (можно просто переименовать)
