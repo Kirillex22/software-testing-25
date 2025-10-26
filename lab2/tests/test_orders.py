@@ -27,19 +27,13 @@ class OrderViewFactory(factory.Factory):
 # ============================
 # Единый интеграционный тест
 # ============================
-def test_order_flow(db_session, kafka_producer):
+def test_order_flow(db_session, kafka_producer, kafka_consumer):
     """Интеграционный тест: take_order -> БД -> NotificationService"""
-
     # 1. Создаем заказ через фабрику
     order_view = OrderViewFactory()
 
     # 2. Настраиваем Kafka Consumer для NotificationService
-    consumer = Consumer({
-        'bootstrap.servers': settings.broker_url,
-        'group.id': f'test-notif-{uuid4()}',
-        'auto.offset.reset': 'earliest'
-    })
-    notification_service = NotificationService(consumer)
+    notification_service = NotificationService(kafka_consumer)
 
     # 3. Запускаем NotificationService в отдельном потоке
     t = threading.Thread(target=notification_service.start_listening, kwargs={'delay': 0.5})

@@ -5,7 +5,7 @@ from impl.orm.order import Base
 from config import Settings, set_settings
 
 @pytest.fixture(scope="session")
-def db_engine(settings: Settings):
+def db_engine(settings):
     """Создаём движок SQLAlchemy"""
     engine = create_engine(settings.database_url)
     Base.metadata.create_all(engine)

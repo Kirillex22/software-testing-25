@@ -1,11 +1,10 @@
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from dataclasses import dataclass
 
-class Settings(BaseSettings):
-    database_url: str # e.g., "sqlite:///./test.db"
-    broker_url: str # e.g., "redis://localhost:6379/0"
-    topic_name: str # e.g., "user-events"
-
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+@dataclass
+class Settings:
+    database_url: str = None # e.g., "sqlite:///./test.db"
+    broker_url: str = None # e.g., "redis://localhost:6379/0"
+    topic_name: str = None # e.g., "user-events"
 
 settings = Settings()
 

@@ -1,6 +1,5 @@
 from confluent_kafka import Consumer
 import json
-import logging
 
 from config import get_settings, Settings
 
@@ -17,7 +16,7 @@ class NotificationService:
     def start_listening(
         self, 
         delay: float = 1.0, 
-        callback=lambda x: logging.info(f"📦 Received: {x}")
+        callback=lambda x: print(f"📦 Received: {x}")
     ) -> None:
 
         self.working = True
@@ -25,6 +24,9 @@ class NotificationService:
         while self.working:
             msg = self._consumer.poll(delay)
             if msg is None:
+                continue
+            if msg.error():
+                print(f"Error: {msg.error()}")
                 continue
             data = json.loads(msg.value())
             callback(data)

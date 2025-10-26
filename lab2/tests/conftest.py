@@ -8,7 +8,7 @@ from config import Settings, set_settings
 def containers():
     """Запускаем PostgreSQL и Kafka в Docker"""
     with PostgresContainer("postgres:16") as postgres, KafkaContainer("confluentinc/cp-kafka:7.5.0") as kafka:
-        time.sleep(5)  # ждём, пока Kafka поднялась
+        time.sleep(5)
         yield {"postgres": postgres, "kafka": kafka}
 
 
@@ -22,8 +22,9 @@ def settings(containers):
         broker_url=kafka.get_bootstrap_server(),
         topic_name="orders"
     )
+    print("Kafka bootstrap server:", kafka.get_bootstrap_server())
     set_settings(cfg)
-    return cfg
+    yield cfg
 
 # Подключаем фикстуры из папки fixtures
 pytest_plugins = [
