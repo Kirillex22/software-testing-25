@@ -1,31 +1,43 @@
 from behave import given, when, then
-from impl.atm import ATM, NotEnoughMoneyException  # предполагаем, что класс ATM в файле atm.py
-import pytest
+from impl.atm import ATM, NotEnoughMoneyException
 
-@given('в банкомате зарегистрирован счёт пользователя "{name}"')
-def step_add_account(context, name):
+@given("в банкомате зарегистрированы пользователи:")
+def step_add_accounts(context):
     context.atm = ATM()
-    context.atm.add_account(name)
-    context.account_name = name
+    context.users = [row.as_dict() for row in context.table]
+    for user in context.users:
+        name = user["name"]
+        balance = int(user["balance"])
+        context.atm.add_account(name)
+        context.atm.deposit(name, balance)
 
-@given('на счёт "{name}" зачислено {amount:d} рублей')
-def step_deposit(context, name, amount):
-    context.atm.deposit(name, amount)
 
-@when('пользователь "{name}" пытается снять {amount:d} рублей')
-def step_withdraw(context, name, amount):
-    try:
-        context.atm.withdraw(name, amount)
-        context.withdraw_exception = None
-    except Exception as e:
-        context.withdraw_exception = e
+@when("пользователи пытаются снять деньги")
+def step_withdraw(context):
+    for user in context.users:
+        name = user["name"]
+        withdraw = int(user["withdraw"])
+        try:
+            context.atm.withdraw(name, withdraw)
+            user["error"] = None
+        except Exception as e:
+            user["error"] = e
 
-@then('операция должна быть отклонена')
-def step_check_exception(context):
-    assert isinstance(context.withdraw_exception, NotEnoughMoneyException), \
-        f"Ожидалось исключение NotEnoughMoneyException, получено: {type(context.withdraw_exception)}"
 
-@then('баланс счёта "{name}" должен остаться равным {expected:d} рублей')
-def step_check_balance(context, name, expected):
-    balance = context.atm.get_balance(name)
-    assert balance == expected, f"Ожидалось {expected}, получено {balance}"
+@then("результаты операций должны соответствовать ожиданиям")
+def step_check_results(context):
+    for user in context.users:
+        name = user["name"]
+        expected_balance = int(user["expected_balance"])
+        expect_error = user["expect_error"].lower() == "true"
+        balance = context.atm.get_balance(name)
+
+        if expect_error:
+            assert isinstance(user["error"], NotEnoughMoneyException), \
+                f"Для {name} ожидалась ошибка NotEnoughMoneyException, но получено {user['error']}"
+        else:
+            assert user["error"] is None, \
+                f"Для {name} не ожидалось ошибок, но получено {user['error']}"
+
+        assert balance == expected_balance, \
+            f"Баланс {name}: ожидалось {expected_balance}, получено {balance}"
