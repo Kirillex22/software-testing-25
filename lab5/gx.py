@@ -1,96 +1,77 @@
 import pandas as pd
 import great_expectations as gx
 import os
+import sqlite3
+from datetime import datetime
 
-from great_expectations.data_context import BaseDataContext
-from great_expectations.core.batch import BatchRequest
-from great_expectations.checkpoint import SimpleCheckpoint
-
-
-# ============================================================
-# 1. ИНИЦИАЛИЗАЦИЯ КОНТЕКСТА GE
-# ============================================================
-
-# Создаем необходимые директории
 os.makedirs("gx/expectations", exist_ok=True)
 os.makedirs("gx/validations", exist_ok=True)
 os.makedirs("gx/uncommitted/data_docs", exist_ok=True)
 
-# В версии 0.18.21 проще использовать встроенные методы для создания контекста
 context = gx.get_context(mode="file")
 
-# ============================================================
-# 2. ДОБАВЛЕНИЕ ИСТОЧНИКОВ ДАННЫХ
-# ============================================================
-
-# CSV datasource
-pandas_ds = context.sources.add_pandas(
-    name="pandas_ref"
-)
-
-# SQLite datasource
+pandas_ds = context.sources.add_pandas(name="pandas_ref")
 sqlite_ds = context.sources.add_sqlite(
     name="sqlite_prod",
     connection_string="sqlite:///sales_warehouse.db"
 )
 
 
-# ============================================================
-# 3. СОЗДАЕМ DATA ASSETS
-# ============================================================
-
 reference_asset = pandas_ds.add_csv_asset(
     name="reference_data",
     filepath_or_buffer="historical_sales.csv",
 )
-
 sql_asset = sqlite_ds.add_table_asset(
     name="daily_sales",
     table_name="daily_sales",
 )
 
-
-# ============================================================
-# 4. АВТОПРОФИЛИРОВАНИЕ (Data Assistant)
-# ============================================================
-
-# Получаем batch request для reference данных
 batch_request = reference_asset.build_batch_request()
 
-# Запускаем Data Assistant
 assistant_result = context.assistants.onboarding.run(
     batch_request=batch_request,
     estimation="exact"
 )
 
-# Получаем и сохраняем expectation suite
-suite = assistant_result.get_expectation_suite("reference_suite")
-context.add_expectation_suite(expectation_suite=suite)
+auto_suite = assistant_result.get_expectation_suite("auto_profile_suite")
+context.add_expectation_suite(expectation_suite=auto_suite)
 
+csv_batch_request = reference_asset.build_batch_request()
 
-# ============================================================
-# 5. ДОБАВЛЕНИЕ РУЧНЫХ ОЖИДАНИЙ
-# ============================================================
+checkpoint_config_auto = {
+    "name": "auto_profile_checkpoint",
+    "config_version": 1.0,
+    "class_name": "SimpleCheckpoint",
+    "validations": [
+        {
+            "batch_request": csv_batch_request,
+            "expectation_suite_name": "auto_profile_suite",
+        }
+    ],
+}
 
-# Получаем suite для редактирования
-suite = context.get_expectation_suite("reference_suite")
+context.add_checkpoint(**checkpoint_config_auto)
 
-# Добавляем expectations с правильными названиями
-suite.add_expectation(
+result_auto = context.run_checkpoint(checkpoint_name="auto_profile_checkpoint")
+print(f"Результат первого checkpoint: {'SUCCESS' if result_auto['success'] else 'FAIL'}")
+
+manual_suite = context.add_expectation_suite("manual_validation_suite")
+
+manual_suite.add_expectation(
     gx.core.ExpectationConfiguration(
         expectation_type="expect_column_values_to_not_be_null",
         kwargs={"column": "amount"},
     )
 )
 
-suite.add_expectation(
+manual_suite.add_expectation(
     gx.core.ExpectationConfiguration(
         expectation_type="expect_column_values_to_be_between",
         kwargs={"column": "amount", "min_value": 0, "strict_min": True},
     )
 )
 
-suite.add_expectation(
+manual_suite.add_expectation(
     gx.core.ExpectationConfiguration(
         expectation_type="expect_column_values_to_match_regex",
         kwargs={
@@ -100,13 +81,6 @@ suite.add_expectation(
     )
 )
 
-context.update_expectation_suite(suite)
-
-
-# ============================================================
-# 6. РАСЧЁТ PARTITION OBJECT ДЛЯ KL-ДИВЕРГЕНЦИИ
-# ============================================================
-
 df_hist = pd.read_csv("historical_sales.csv")
 hist = df_hist["category"].value_counts(normalize=True).to_dict()
 
@@ -115,7 +89,7 @@ partition_object = {
     "weights": list(hist.values()),
 }
 
-suite.add_expectation(
+manual_suite.add_expectation(
     gx.core.ExpectationConfiguration(
         expectation_type="expect_column_kl_divergence_to_be_less_than",
         kwargs={
@@ -126,45 +100,26 @@ suite.add_expectation(
     )
 )
 
-context.update_expectation_suite(suite)
+context.update_expectation_suite(manual_suite)
 
-
-# ============================================================
-# 7. СОЗДАЕМ CHECKPOINT
-# ============================================================
-
-# Создаем batch request для SQL данных
 sql_batch_request = sql_asset.build_batch_request()
 
-checkpoint_config = {
-    "name": "sales_quality_check",
+checkpoint_config_manual = {
+    "name": "sql_validation_checkpoint", 
     "config_version": 1.0,
     "class_name": "SimpleCheckpoint",
     "validations": [
         {
             "batch_request": sql_batch_request,
-            "expectation_suite_name": "reference_suite",
+            "expectation_suite_name": "manual_validation_suite",
         }
     ],
 }
 
-context.add_checkpoint(**checkpoint_config)
+context.add_checkpoint(**checkpoint_config_manual)
 
-
-# ============================================================
-# 8. ЗАПУСК ЧЕКПОИНТА
-# ============================================================
-
-print("\n=== Запуск чекпоинта ===")
-result = context.run_checkpoint(checkpoint_name="sales_quality_check")
-print(f"Результат: {result['success']}")
-
-
-# ============================================================
-# 9. СБОРКА DATA DOCS
-# ============================================================
+result_manual = context.run_checkpoint(checkpoint_name="sql_validation_checkpoint")
+print(f"Результат 2 checkpoint: {'SUCCESS' if result_manual['success'] else 'FAIL'}")
 
 context.build_data_docs()
-
-print("\nГотово! Открой файл:")
-print("gx/uncommitted/data_docs/local_site/index.html")
+print("finish...")
